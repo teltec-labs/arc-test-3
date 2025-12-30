@@ -2,53 +2,58 @@ name: Test ARC Runner
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+    paths:
+      - "workflows/**"
+
+permissions:
+  contents: write
 
 jobs:
-  test-runner:
+  sync:
     runs-on: arc-runner-set
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Show runner information
+      - name: Guard - avoid loop commits
         run: |
-          echo "=== Runner Information ==="
-          echo "Runner name: $RUNNER_NAME"
-          echo "Runner OS: $RUNNER_OS"
-          echo "Runner arch: $RUNNER_ARCH"
-          echo "Workspace: $GITHUB_WORKSPACE"
-          echo ""
-          echo "=== System Information ==="
-          uname -a
-          echo ""
-          echo "=== Available resources ==="
-          df -h
-          echo ""
-          free -h || true
+          MSG="$(git log -1 --pretty=%B)"
+          echo "Last commit message: $MSG"
+          if echo "$MSG" | grep -qi "\[n8n-sync\]"; then
+            echo "This is an automation commit. Skipping."
+            exit 0
+          fi
 
-      - name: Test basic commands
-        run: |
-          echo "=== Testing basic commands ==="
-          pwd
-          ls -la
-          whoami
-          date
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Test environment variables
-        run: |
-          echo "=== GitHub Context ==="
-          echo "Repository: ${{ github.repository }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-          echo "SHA: ${{ github.sha }}"
+      - name: Sync projects
+        env:
+          N8N_BASE_URL: ${{ secrets.N8N_BASE_URL }}
+          N8N_AUTH_COOKIE: ${{ secrets.TESTE_SECRET }}
 
-      - name: Success message
+          TARGET_WORKFLOWS_DIR: "workflows"
+
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA:  ${{ github.sha }}
         run: |
-          echo "✅ ARC Runner is working correctly!"
-          echo "All tests passed successfully."
+          node version
+
+      - name: Commit & push (if changes)
+        run: |
+          if git status --porcelain | grep .; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: sync n8n workflows by project [n8n-sync]"
+            git push
+          else
+            echo "No changes to commit."
+          fi
