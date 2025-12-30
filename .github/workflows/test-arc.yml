@@ -42,7 +42,7 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA:  ${{ github.sha }}
         run: |
-          node version
+          node --version
 
       - name: Commit & push (if changes)
         run: |
