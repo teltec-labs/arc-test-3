@@ -43,6 +43,8 @@ jobs:
           AFTER_SHA:  ${{ github.sha }}
         run: |
           node --version
+          mkdir teste
+          touch teste/teste
 
       - name: Commit & push (if changes)
         run: |
