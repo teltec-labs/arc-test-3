@@ -11,10 +11,54 @@ permissions:
   contents: write
 
 jobs:
-  sync:
-    runs-on: arc-runner-set
+  # Job 1 - Cria artefato inicial (runner managed)
+  create-artifact:
+    runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Generate file with script.js
+        run: |
+          echo "🔹 Job 1: Creating initial artifact"
+          node script.js
+
+      - name: List generated files
+        run: |
+          echo "📁 Files created in Job 1:"
+          ls -lh file-*.txt || echo "No files found"
+
+      - name: Upload artifact from Job 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-artifacts
+          path: file-*.txt
+          retention-days: 1
+
+  # Job 2 - Job existente (runner self-hosted) + adiciona mais artefato
+  sync:
+    runs-on: arc-runner-set
+    needs: create-artifact
+
+    steps:
+      - name: Download artifact from Job 1
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-artifacts
+          path: artifacts-from-job1
+
+      - name: Verify downloaded artifacts
+        run: |
+          echo "📥 Job 2: Downloaded artifacts from Job 1:"
+          ls -lh artifacts-from-job1/
+          cat artifacts-from-job1/file-*.txt
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -47,6 +91,40 @@ jobs:
           node --version
           node script.js
 
+      - name: Create additional file in Job 2
+        run: |
+          echo "🔹 Job 2: Creating additional artifact"
+          node -e "
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const hash = crypto.randomBytes(8).toString('hex');
+            const fileName = \`file-job2-\${hash}.txt\`;
+            const content = \`Generated in Job 2
+            Hash: \${hash}
+            Timestamp: \${new Date().toISOString()}
+            This file was created in the self-hosted runner
+            \`;
+            fs.writeFileSync(fileName, content);
+            console.log('✅ File created in Job 2:', fileName);
+          "
+
+      - name: Combine artifacts
+        run: |
+          echo "📦 Combining artifacts from Job 1 and Job 2"
+          mkdir -p combined-artifacts
+          cp artifacts-from-job1/file-*.txt combined-artifacts/ 2>/dev/null || true
+          cp file-*.txt combined-artifacts/ 2>/dev/null || true
+          echo "📁 Combined artifacts:"
+          ls -lh combined-artifacts/
+
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-artifacts
+          path: combined-artifacts/
+          retention-days: 1
+          overwrite: true
+
       - name: Commit & push (if changes)
         run: |
           if git status --porcelain | grep .; then
@@ -58,3 +136,42 @@ jobs:
           else
             echo "No changes to commit."
           fi
+
+  # Job 3 - Valida artefatos (runner managed)
+  verify-artifact:
+    runs-on: ubuntu-latest
+    needs: sync
+
+    steps:
+      - name: Download final artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-artifacts
+          path: final-artifacts
+
+      - name: Verify and validate artifacts
+        run: |
+          echo "✅ Job 3: Validating final artifacts"
+          echo ""
+          echo "📁 All artifacts received:"
+          ls -lh final-artifacts/
+          echo ""
+          echo "📊 Total files: $(ls final-artifacts/ | wc -l)"
+          echo ""
+          echo "📄 Content of each file:"
+          echo "================================"
+          for file in final-artifacts/file-*.txt; do
+            if [ -f "$file" ]; then
+              echo ""
+              echo "--- $(basename $file) ---"
+              cat "$file"
+            fi
+          done
+          echo ""
+          echo "================================"
+          echo "✅ Validation complete!"
+          echo ""
+          echo "🎯 Summary:"
+          echo "  - Job 1 (ubuntu-latest): Created initial file(s)"
+          echo "  - Job 2 (arc-runner-set): Added additional file(s)"
+          echo "  - Job 3 (ubuntu-latest): Successfully received all artifacts"
